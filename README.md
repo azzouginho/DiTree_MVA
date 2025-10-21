@@ -6,7 +6,7 @@ Official implementation of the paper "Train Once Plan Anywhere Kinodynamic Motio
 
 This repository contains the code and experiment setup for  **Train-Once Plan-Anywhere Kinodynamic Motion Planning via Diffusion Trees** . It includes training configuration, experiment execution scripts, and pretrained model checkpoints.
 
-The associated car dataset and model weights are available for download [here](https://drive.google.com/drive/folders/1WiBU2g1qQn_2j6v1ZTB1eU0dAyCGoX7F?usp=sharing).
+The associated car dataset and model weights are available for download [here](https://drive.google.com/drive/folders/1k8Btmcfqqa1YHKoZ8GNUEc8YKzK4SmWS?usp=drive_link).
 
 ---
 
