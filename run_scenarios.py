@@ -1,12 +1,9 @@
 import csv
 import os
 import time
-from datetime import datetime
 import random
 import yaml
 
-import matplotlib.pyplot as plt
-import minari
 import numpy as np
 import torch
 
@@ -16,7 +13,6 @@ gym.register_envs(gymnasium_robotics)
 
 from car_env import CarEnv
 
-from tqdm import tqdm
 
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
@@ -27,7 +23,6 @@ from policies.fm_policy import DiffusionSampler
 from planners.RRT import RRT_Planner
 from planners.MPC import MPC_Planner
 
-import common.map_utils
 
 
 # import gdown
@@ -156,7 +151,7 @@ def evaluate_all_scenarios(mazes_dir, scenarios_file, cfg_file, total_runs=100, 
         down_dims=unet_down_dims,
     )
 
-    checkpoint = torch.load(output_dir + diffusion_sampler_checkpoints['resnet'])
+    checkpoint = torch.load(output_dir + diffusion_sampler_checkpoints['resnet'],device)
     noise_pred_net.load_state_dict(checkpoint['noise_pred_net_state_dict'])
     noise_pred_net = noise_pred_net.to(device).eval()
 

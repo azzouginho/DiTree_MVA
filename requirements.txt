@@ -3,3 +3,6 @@ tqdm
 spatialmath-python   
 gymnasium_robotics
 casadi
+tensorboard
+diffusers
+einops
