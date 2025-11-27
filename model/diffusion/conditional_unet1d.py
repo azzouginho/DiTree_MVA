@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops
 from einops.layers.torch import Rearrange
-from termcolor import cprint
 from model.diffusion.conv1d_components import Downsample1d, Upsample1d, Conv1dBlock
 from model.diffusion.positional_embedding import SinusoidalPosEmb
 
