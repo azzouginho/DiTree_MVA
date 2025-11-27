@@ -14,7 +14,6 @@ from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
 import gymnasium_robotics
 
-gym.register_envs(gymnasium_robotics)
 import minari
 
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -22,31 +21,39 @@ from diffusers.training_utils import EMAModel
 from diffusers.optimization import get_scheduler
 
 from maze_datasets import MazeDataset
-from common.map_utils import load_forest, create_tree_grid
 from rollout_manager import rollout
 
 from local_map_encoder import ConditionalUnet1DWithLocalMap, ConditionalUnet1D
 from log_to_tensorboard import log_results
 
+gym.register_envs(gymnasium_robotics)
+
 
 def init_noise_pred_net(
-        input_dim,
-        action_dim,
-        obs_dim,
-        obs_history,
-        action_history=0,
-        goal_conditioned=True,
-        goal_dim=2,
-        local_map_conditioned=True,
-        local_map_encoder="identity",
-        local_map_embedding_dim=9,
-        local_map_size=None,
-        **kwargs,
+    input_dim,
+    action_dim,
+    obs_dim,
+    obs_history,
+    action_history=0,
+    goal_conditioned=True,
+    goal_dim=2,
+    local_map_conditioned=True,
+    local_map_encoder="identity",
+    local_map_embedding_dim=9,
+    local_map_size=None,
+    **kwargs,
 ):
-    global_cond_dim = obs_dim * obs_history + goal_dim * goal_conditioned + action_history * action_dim
+    global_cond_dim = (
+        obs_dim * obs_history
+        + goal_dim * goal_conditioned
+        + action_history * action_dim
+    )
     if local_map_conditioned is not None:
-        if local_map_encoder.lower() == "identity" or local_map_encoder.lower() == "mlp":
-            embedding_dim = local_map_size ** 2
+        if (
+            local_map_encoder.lower() == "identity"
+            or local_map_encoder.lower() == "mlp"
+        ):
+            embedding_dim = local_map_size**2
         else:
             embedding_dim = local_map_embedding_dim
 
@@ -56,13 +63,11 @@ def init_noise_pred_net(
             embedding_dim=embedding_dim,
             additional_global_cond_dim=global_cond_dim,
             local_map_size=local_map_size,
-            **kwargs
+            **kwargs,
         )
     else:
         noise_pred_net = ConditionalUnet1D(
-            input_dim=input_dim,
-            global_cond_dim=global_cond_dim,
-            **kwargs
+            input_dim=input_dim, global_cond_dim=global_cond_dim, **kwargs
         )
     return noise_pred_net
 
@@ -77,19 +82,23 @@ def get_dataset(env_id):
             raise ValueError(f"Invalid env_id: {env_id}")
         with open(filename, "rb") as f:
             dataset = pickle.load(f)
+
         def get_obs(sample):
-            return sample['observation']
+            return sample["observation"]
+
         def get_act(sample):
-            return sample['actions']
+            return sample["actions"]
 
     elif "car" in env_id.lower():
         filename = "datasets/car_episodes_small.pkl"
         with open(filename, "rb") as f:
             dataset = pickle.load(f)
+
         def get_obs(sample):
-            return sample['observation']
+            return sample["observation"]
+
         def get_act(sample):
-            return sample['actions']
+            return sample["actions"]
 
     else:
         if isinstance(env_id, list):
@@ -100,8 +109,10 @@ def get_dataset(env_id):
             env_id = env_id[0]
         else:
             dataset = minari.load_dataset(env_id, download=False)
+
         def get_obs(sample):
-            return sample.observations['observation']
+            return sample.observations["observation"]
+
         def get_act(sample):
             return sample.actions
 
@@ -129,8 +140,12 @@ def get_dataset(env_id):
         for episode in tqdm(dataset):
             Observations_sum += np.sum(get_obs(episode), axis=0)
             Observations_sum_sq += np.sum(get_obs(episode) ** 2, axis=0)
-            observations_min = np.minimum(observations_min, np.min(get_obs(episode), axis=0))
-            observations_max = np.maximum(observations_max, np.max(get_obs(episode), axis=0))
+            observations_min = np.minimum(
+                observations_min, np.min(get_obs(episode), axis=0)
+            )
+            observations_max = np.maximum(
+                observations_max, np.max(get_obs(episode), axis=0)
+            )
             Actions_sum += np.sum(get_act(episode), axis=0)
             Actions_sum_sq += np.sum(get_act(episode) ** 2, axis=0)
             actions_min = np.minimum(actions_min, np.min(get_act(episode), axis=0))
@@ -139,9 +154,11 @@ def get_dataset(env_id):
 
         # Calculate mean and standard deviation
         observations_mean = Observations_sum / total_steps
-        observations_std = np.sqrt(Observations_sum_sq / total_steps - observations_mean ** 2)
+        observations_std = np.sqrt(
+            Observations_sum_sq / total_steps - observations_mean**2
+        )
         actions_mean = Actions_sum / total_steps
-        actions_std = np.sqrt(Actions_sum_sq / total_steps - actions_mean ** 2)
+        actions_std = np.sqrt(Actions_sum_sq / total_steps - actions_mean**2)
 
         # Pack into a dictionary
         metadata = {
@@ -161,47 +178,43 @@ def get_dataset(env_id):
 
 
 def train_by_steps(
-        debug=False,
-        # Resume training
-        checkpoint=None,
-
-        # Settings
-        seed=42,
-        device='cuda' if torch.cuda.is_available() else 'cpu',
-        output_dir='checkpoints/',
-        experiment_name=f"diffusion_planning_{datetime.now().strftime('%d_%m_%H_%M')}",
-        env_id="pointmaze-medium-v2",  # ["antmaze-large-diverse-v1", "pointmaze-medium-v2"]
-        rollouts=True,
-        prediction_type='observations',
-        obs_history=1,  # number of observations to use per sample
-        action_history=1,  # number of past actions to use per sample
-        position_conditioned=False,
-        goal_conditioned=True,
-        goal_dim=2,
-        local_map_conditioned=True,
-        local_map_size=10,
-        local_map_scale=0.2,
-        local_map_embedding_dim=64,
-        local_map_encoder="identity",
-        augmentations=None,
-
-        # Training settings
-        num_epochs=100,
-        batch_size=128, #256,
-        num_workers=3,
-        checkpoint_every=10,
-        rollout_every=10,
-        max_rollout_steps=250,
-        num_episodes=5,  # rollout episodes
-
-        # Diffusion settings
-        policy="diffusion",  # "diffusion"/"flow_matching"
-        num_diffusion_iters=100,
-        unet_down_dims=[256, 512, 1024],
-
-        # MPC settings
-        pred_horizon=16,
-        action_horizon=8,
+    debug=False,
+    # Resume training
+    checkpoint=None,
+    # Settings
+    seed=42,
+    device="cuda" if torch.cuda.is_available() else "cpu",
+    output_dir="checkpoints/",
+    experiment_name=f"diffusion_planning_{datetime.now().strftime('%d_%m_%H_%M')}",
+    env_id="pointmaze-medium-v2",  # ["antmaze-large-diverse-v1", "pointmaze-medium-v2"]
+    rollouts=True,
+    prediction_type="observations",
+    obs_history=1,  # number of observations to use per sample
+    action_history=1,  # number of past actions to use per sample
+    position_conditioned=False,
+    goal_conditioned=True,
+    goal_dim=2,
+    local_map_conditioned=True,
+    local_map_size=10,
+    local_map_scale=0.2,
+    local_map_embedding_dim=64,
+    local_map_encoder="identity",
+    augmentations=None,
+    # Training settings
+    num_epochs=100,
+    batch_size=128,  # 256,
+    num_workers=3,
+    checkpoint_every=10,
+    rollout_every=10,
+    max_rollout_steps=250,
+    num_episodes=5,  # rollout episodes
+    # Diffusion settings
+    policy="diffusion",  # "diffusion"/"flow_matching"
+    num_diffusion_iters=100,
+    unet_down_dims=[256, 512, 1024],
+    # MPC settings
+    pred_horizon=16,
+    action_horizon=8,
 ):
     # set seed
     random.seed(seed)
@@ -210,12 +223,12 @@ def train_by_steps(
 
     s_global = 1.0
     if "antmaze" in env_id:
-        env_id = 'antmaze-large-diverse-v1'
+        env_id = "antmaze-large-diverse-v1"
         # obs_dim = 27
-        obs_dim = 29    # with 6D rotation representation
+        obs_dim = 29  # with 6D rotation representation
         action_dim = 8
         s_global = 4.0
-        map_center = (24.0, 18.0)#(6.0, 4.5)
+        map_center = (24.0, 18.0)  # (6.0, 4.5)
 
     elif "pointmaze" in env_id:
         env_id = "pointmaze-large-v2"
@@ -230,7 +243,7 @@ def train_by_steps(
 
     elif "drone" in env_id:
         # obs_dim = 10
-        obs_dim = 12    # with 6D rotation representation
+        obs_dim = 12  # with 6D rotation representation
         if not position_conditioned:
             obs_dim -= 2  # remove (x,y)
         action_dim = 4
@@ -241,7 +254,7 @@ def train_by_steps(
         obs_dim = full_obs_dim
         if not position_conditioned:
             # obs_dim -= 2
-            obs_dim -= 3 # temp no yaww
+            obs_dim -= 3  # temp no yaww
         action_dim = 2
         map_center = (6.0, 4.5)
 
@@ -251,7 +264,6 @@ def train_by_steps(
     os.makedirs(output_dir, exist_ok=True)
     dataset, metadata = get_dataset(env_id)
 
-
     # sizes = int(0.95 * dataset.total_episodes), int(0.05 * dataset.total_episodes)
     if debug:
         size = 32
@@ -260,21 +272,37 @@ def train_by_steps(
         elif "drone" in env_id:
             dataset = dataset[:size]
 
-
     # if pointmaze or antmaze, use the maze map as global map
     if "pointmaze" in env_id:
-        global_map = np.float32(dataset.env_spec.kwargs['maze_map']) if local_map_conditioned else None
+        global_map = (
+            np.float32(dataset.env_spec.kwargs["maze_map"])
+            if local_map_conditioned
+            else None
+        )
 
     else:
-        global_map = np.genfromtxt('maps/mazes/D4RL_large.csv', delimiter=',',
-                                   dtype=np.float32) if local_map_conditioned else None
+        global_map = (
+            np.genfromtxt("maps/mazes/D4RL_large.csv", delimiter=",", dtype=np.float32)
+            if local_map_conditioned
+            else None
+        )
 
-    train_dataset = MazeDataset(dataset, metadata,env_id, obs_history=obs_history, action_history=action_history,
-                                   pred_horizon=pred_horizon, prediction_type=prediction_type,
-                                   position_conditioned=position_conditioned,
-                                   local_map_size=local_map_size, scale=local_map_scale,
-                                   global_map=global_map, s_global=s_global, map_center=map_center,
-                                   augmentations=augmentations)
+    train_dataset = MazeDataset(
+        dataset,
+        metadata,
+        env_id,
+        obs_history=obs_history,
+        action_history=action_history,
+        pred_horizon=pred_horizon,
+        prediction_type=prediction_type,
+        position_conditioned=position_conditioned,
+        local_map_size=local_map_size,
+        scale=local_map_scale,
+        global_map=global_map,
+        s_global=s_global,
+        map_center=map_center,
+        augmentations=augmentations,
+    )
 
     persistent_workers = True
     predict_delta = True
@@ -284,7 +312,8 @@ def train_by_steps(
         max_rollout_steps = 10
         import matplotlib.pyplot as plt
         import matplotlib as mpl
-        mpl.use('TkAgg')  # 'Qt5Agg/'TkAgg'
+
+        mpl.use("TkAgg")  # 'Qt5Agg/'TkAgg'
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
@@ -318,37 +347,39 @@ def train_by_steps(
             num_train_timesteps=num_diffusion_iters,
             # the choise of beta schedule has big impact on performance
             # we found squared cosine works the best
-            beta_schedule='squaredcos_cap_v2',
+            beta_schedule="squaredcos_cap_v2",
             # clip output to [-1,1] to improve stability
             clip_sample=True,
             # our network predicts noise (instead of denoised action)
-            prediction_type='epsilon'
+            prediction_type="epsilon",
         )
 
-    ema = EMAModel(
-        parameters=noise_pred_net.parameters(),
-        power=0.75)
+    ema = EMAModel(parameters=noise_pred_net.parameters(), power=0.75)
     ema_noise_pred_net = noise_pred_net
 
     optimizer = torch.optim.AdamW(
         params=noise_pred_net.parameters(),
-        lr=3.0e-5, betas=(0.95, 0.999), eps=1.0e-8, weight_decay=1e-6)  #   #lr=1e-4, weight_decay=1e-6
+        lr=3.0e-5,
+        betas=(0.95, 0.999),
+        eps=1.0e-8,
+        weight_decay=1e-6,
+    )  #   #lr=1e-4, weight_decay=1e-6
 
     lr_scheduler = get_scheduler(
         name="cosine",  # 'cosine',
         optimizer=optimizer,
-        num_warmup_steps=5000,    #500,
-        num_training_steps=len(train_dataloader) * num_epochs
+        num_warmup_steps=5000,  # 500,
+        num_training_steps=len(train_dataloader) * num_epochs,
     )
 
     start_epoch = 1
     if checkpoint is not None:
         checkpoint = torch.load(output_dir + checkpoint)
-        noise_pred_net.load_state_dict(checkpoint['noise_pred_net_state_dict'])
-        ema.load_state_dict(checkpoint['ema_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch'] + 1
-        loss = checkpoint['loss']
+        noise_pred_net.load_state_dict(checkpoint["noise_pred_net_state_dict"])
+        ema.load_state_dict(checkpoint["ema_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        loss = checkpoint["loss"]
         print(f"Loaded checkpoint from epoch {checkpoint['epoch']} with loss {loss}")
 
     results_per_scenario, frames = rollout(
@@ -371,24 +402,32 @@ def train_by_steps(
     if frames:
         clip = ImageSequenceClip(frames, fps=10)
         os.makedirs("video", exist_ok=True)
-        clip.write_videofile(f'video/{experiment_name}_epoch_{start_epoch}.mp4')
+        clip.write_videofile(f"video/{experiment_name}_epoch_{start_epoch}.mp4")
 
     if not debug:
         writer = SummaryWriter(log_dir=f"runs/{experiment_name}")
-        log_results(writer, results_per_scenario, start_epoch - 1,
-                    experiment_name, env_id,s_global)
+        log_results(
+            writer,
+            results_per_scenario,
+            start_epoch - 1,
+            experiment_name,
+            env_id,
+            s_global,
+        )
     else:
         writer = None
 
     step = 0
     for epoch in range(start_epoch, num_epochs + 1):  # [1,num_epochs]
         epoch_loss = list()
-        with tqdm(train_dataloader, desc=f'Epoch {epoch}') as tepoch:
+        with tqdm(train_dataloader, desc=f"Epoch {epoch}") as tepoch:
             for nobs, naction, goal, local_map in tepoch:
                 step += 1
                 obs_cond = nobs[:, :obs_history, :]
                 # device transfer
-                obs_cond, naction, goal = train_dataset.normalize_samples(obs_cond, naction, goal)
+                obs_cond, naction, goal = train_dataset.normalize_samples(
+                    obs_cond, naction, goal
+                )
                 obs_cond = obs_cond.to(device).float()
                 nobs = nobs.to(device).float()
                 naction = naction.to(device).float()
@@ -425,16 +464,18 @@ def train_by_steps(
                 if policy == "diffusion":
                     # sample a diffusion iteration for each data point
                     timesteps = torch.randint(
-                        0, noise_scheduler.config.num_train_timesteps,
-                        (B,), device=device
+                        0,
+                        noise_scheduler.config.num_train_timesteps,
+                        (B,),
+                        device=device,
                     ).long()
                     # add noise to the clean images according to the noise magnitude at each diffusion iteration
                     # (this is the forward diffusion process)
-                    noisy_actions = noise_scheduler.add_noise(
-                        naction, noise, timesteps)
+                    noisy_actions = noise_scheduler.add_noise(naction, noise, timesteps)
                     # predict the noise residual
                     noise_pred = noise_pred_net(
-                        noisy_actions, local_map, timesteps, global_cond=obs_cond)
+                        noisy_actions, local_map, timesteps, global_cond=obs_cond
+                    )
                     # L2 loss
                     loss = nn.functional.mse_loss(noise_pred, noise)
                 elif policy == "flow_matching":
@@ -443,7 +484,8 @@ def train_by_steps(
                     target_vel = naction - noise
                     timesteps = t.squeeze() * 20  # pos_emb_scale
                     pred_vel = noise_pred_net(
-                        z_t, local_map, timesteps, global_cond=obs_cond)
+                        z_t, local_map, timesteps, global_cond=obs_cond
+                    )
                     loss = nn.functional.mse_loss(pred_vel, target_vel)
                 else:
                     raise NotImplementedError
@@ -467,13 +509,16 @@ def train_by_steps(
                 # save model
                 if step % checkpoint_every == 0 and step > 0:
                     checkpoint = {
-                        'epoch': epoch,
-                        'noise_pred_net_state_dict': ema_noise_pred_net.state_dict(),
-                        'ema_state_dict': ema.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'loss': loss
+                        "epoch": epoch,
+                        "noise_pred_net_state_dict": ema_noise_pred_net.state_dict(),
+                        "ema_state_dict": ema.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "loss": loss,
                     }
-                    torch.save(checkpoint, f"{output_dir}/{experiment_name}_epoch_{epoch}_step_{step}.pt")
+                    torch.save(
+                        checkpoint,
+                        f"{output_dir}/{experiment_name}_epoch_{epoch}_step_{step}.pt",
+                    )
 
                 # rollout test
                 if rollouts and ((step % rollout_every == 0 and step > 0) or debug):
@@ -496,11 +541,20 @@ def train_by_steps(
                             pred_horizon=pred_horizon,
                             action_horizon=action_horizon,
                         )
-                        log_results(writer, results_per_scenario, epoch,
-                                    experiment_name, env_id, s_global, step=step)
+                        log_results(
+                            writer,
+                            results_per_scenario,
+                            epoch,
+                            experiment_name,
+                            env_id,
+                            s_global,
+                            step=step,
+                        )
                         if frames:
                             clip = ImageSequenceClip(frames, fps=10)
-                            clip.write_videofile(f'video/{experiment_name}_epoch_{epoch}.mp4')
+                            clip.write_videofile(
+                                f"video/{experiment_name}_epoch_{epoch}.mp4"
+                            )
                     except Exception as e:
                         print("Rollout Failed: ")
                         print(e)
@@ -510,7 +564,7 @@ def train_by_steps(
 
         # log epoch loss
         if not debug:
-            writer.add_scalar('Loss/train', np.mean(epoch_loss), epoch)
+            writer.add_scalar("Loss/train", np.mean(epoch_loss), epoch)
 
     # Weights of the EMA model
     # is used for inference
@@ -518,6 +572,3 @@ def train_by_steps(
     ema.copy_to(ema_noise_pred_net.parameters())
 
     print("Done")
-
-
-

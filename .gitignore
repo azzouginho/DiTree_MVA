@@ -1,0 +1,9 @@
+.venv
+__pycache__
+checkpoints/
+tree*
+.DS_Store
+path*
+narrow_diffusion_RRT*
+Race Track_diffusion_RRT*
+random xlarge2_diffusion_RRT*
