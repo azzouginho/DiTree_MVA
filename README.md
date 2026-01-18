@@ -1,3 +1,25 @@
+# DiTree: Kinodynamic Motion Planning via Diffusion Trees (Guided Extension)
+
+**Report:** More details here in `report.pdf`
+
+> **MVA Project - Robotics**
+> *Extension of the CoRL 2025 paper by Hassidof et al.*
+
+---
+
+## 🚀 Our Contribution: Guided Tree Search
+
+While the original DiTree relies on global diffusion policies, exploring complex mazes with narrow passages remains challenging. In this fork, **we implemented a Guided Tree Search strategy** to bias the exploration.
+
+### Key Features Implemented:
+* **BFS Initialization:** We introduced a discrete grid-based BFS pre-processing step (`generate_intermediate_goals`) to find a coarse path skeleton avoiding static obstacles.
+* **Intermediate Goals:** The planner now automatically generates a sequence of intermediate waypoints along the BFS path.
+* **Biased Sampling Strategy:** Modified the `RRT.py` expansion loop. Instead of sampling purely randomly or towards the final goal, the tree now progressively targets the next intermediate goal based on a proximity cost heuristic (`get_distance_to_goal`).
+
+**Result:** This approach significantly reduces the time to find a first solution in "Maze" environments by guiding the diffusion sampler through bottlenecks.
+
+---
+
 # DiTree
 
 [project page](https://sites.google.com/view/ditree/home) , [paper](https://arxiv.org/abs/2508.21001)
