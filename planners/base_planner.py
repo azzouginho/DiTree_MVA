@@ -16,13 +16,14 @@ from policies.fm_policy import DiffusionSampler
 
 
 class Node:
-    def __init__(self, state, parent_action_seq=None,parent_states_seq=None, parent=None):
+    def __init__(self, state, parent_action_seq=None,parent_states_seq=None, parent=None, intermediate_goal_index=0):
         self.state = state
         self.parent_action_seq = parent_action_seq  # Action preceding this state (N,act_dim)
         self.parent_states_seq = parent_states_seq  # States preceding this state (1,N,obs_dim)
         self.parent = parent
         self.cached_actions = deque([])
         self.num_visit = 0
+        self.intermediate_goal_index = intermediate_goal_index
 
 class BasePlanner(abc.ABC):
     def __init__(self, start_state, goal_state,
@@ -365,6 +366,10 @@ class BasePlanner(abc.ABC):
         car_corners += np.array([x, y])
         plt.fill(car_corners[:, 0], car_corners[:, 1], color='g')#, alpha=0.5
         plt.scatter(self.goal_state[0], self.goal_state[1], color='r', s=100)
+        # Visualize intermediate goals
+        intermediate_goals, _, _ = self.generate_intermediate_goals(self.start_node.state, self.goal_state)
+        for ig in intermediate_goals:
+            plt.scatter(ig[0], ig[1], color='orange', s=50, marker='x')
         plt.legend(['Start State', 'Goal'], loc='upper right')
 
         for node in self.node_list:
